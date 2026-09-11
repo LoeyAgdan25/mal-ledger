@@ -896,3 +896,212 @@ def test_e7_recalculation_assesses_fees_on_negative_closing_days():
     ]
 
     assert fee_days == [2, 4, 5]
+
+# reversal testing
+
+def test_e9_reverses_e7_without_deleting_original_entry():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+                event_id="E1",
+                posted_day=1,
+                value_day=1,
+                account_id="ACC-001",
+                event_type=EventType.CREDIT,
+                amount=Decimal("250.00"),
+            )
+        )
+
+    engine.replay(
+        Event(
+                event_id="E7",
+                posted_day=5,
+                value_day=2,
+                account_id="ACC-001",
+                event_type=EventType.DEBIT,
+                amount=Decimal("620.00"),
+            )
+        )
+
+    assert engine.balance_on(
+            "ACC-001",
+            2,
+        ) == Decimal("-370.00")
+
+    engine.replay(
+            Event(
+                event_id="E9",
+                posted_day=6,
+                value_day=2,
+                account_id="ACC-001",
+                event_type=EventType.REVERSAL,
+                reference_event_id="E7",
+            )
+        )
+
+    assert engine.balance_on(
+            "ACC-001",
+            2,
+        ) == Decimal("250.00")
+
+    e7_entries = [
+            entry
+            for entry in engine.entries
+            if entry.source_event_id == "E7"
+        ]
+
+    e9_entries = [
+            entry
+            for entry in engine.entries
+            if entry.source_event_id == "E9"
+        ]
+
+    assert len(e7_entries) == 1
+    assert len(e9_entries) == 1
+
+    assert e7_entries[0].amount == Decimal("-620.00")
+    assert e9_entries[0].amount == Decimal("620.00")
+
+    # engine.replay(
+    #         Event(
+    #             event_id="E8",
+    #             posted_day=5,
+    #             value_day=5,
+    #             account_id="ACC-001",
+    #             event_type=EventType.AUTHORIZATION,
+    #             authorization_id="Auth-B",
+    #             amount=Decimal("90.00"),
+    #         )
+    #     )
+
+    # assert (
+    #         engine.authorization_state("Auth-B")
+    #         == AuthorizationState.REJECTED
+    #     )
+
+    # assert engine.active_holds(
+    #         "ACC-001",
+    #         5,
+    #     ) == Decimal("0.00")
+
+
+def test_e8_auth_b_is_rejected_when_available_balance_is_negative():
+    engine = create_engine()
+
+    # E1: +1200
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        )
+    )
+
+    # E2: -950
+    engine.replay(
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        )
+    )
+
+    # E3: Auth-A hold 200
+    engine.replay(
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+    )
+
+    # E4: +400
+    engine.replay(
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        )
+    )
+
+    # E5: settle Auth-A for 185
+    engine.replay(
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        )
+    )
+
+    # E7: backdated debit
+    engine.replay(
+        Event(
+            event_id="E7",
+            posted_day=5,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("620.00"),
+        )
+    )
+
+    # Apply overdraft fees through Day 5
+    engine.assess_overdraft_fees_through(
+        "ACC-001",
+        5,
+    )
+
+    # Before E8, account should already be negative.
+    assert engine.balance_on(
+        "ACC-001",
+        5,
+    ) == Decimal("-230.00")
+
+    # E8: Auth-B tries to hold another 90
+    engine.replay(
+        Event(
+            event_id="E8",
+            posted_day=5,
+            value_day=5,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-B",
+            amount=Decimal("90.00"),
+        )
+    )
+
+    # Auth-B must be rejected.
+    assert (
+        engine.authorization_state("Auth-B")
+        == AuthorizationState.REJECTED
+    )
+
+    # Rejected authorization must not create a hold.
+    assert engine.active_holds(
+        "ACC-001",
+        5,
+    ) == Decimal("0.00")
+
+    # Authorization must not change ledger balance.
+    assert engine.balance_on(
+        "ACC-001",
+        5,
+    ) == Decimal("-230.00")

@@ -38,6 +38,10 @@ class LedgerEngine:
 
         elif event.event_type == EventType.SETTLEMENT:
             self._process_settlement(event, account)
+
+        elif event.event_type == EventType.REVERSAL:
+            self._process_reversal(event, account)    
+
         else:
             raise NotImplementedError(
                 f"{event.event_type} is not implemented yet"
@@ -392,3 +396,80 @@ class LedgerEngine:
                 account_id,
                 day,
             )
+
+    # reversal to find original monetary amount
+    def find_entry_by_source_event(
+        self,
+        event_id: str,
+    ) -> LedgerEntry | None:
+        for entry in self.entries:
+            if entry.source_event_id == event_id:
+                return entry
+
+        return None
+
+    # prevent reversal to not happened twice
+    def has_reversal_for(
+        self,
+        original_event_id: str,
+    ) -> bool:
+        return any(
+            event.event_type == EventType.REVERSAL
+            and event.reference_event_id == original_event_id
+            for event in self.events
+        )
+
+
+    # process the reversal
+    def _process_reversal(
+        self,
+        event: Event,
+        account: Account,
+    ) -> None:
+        if event.reference_event_id is None:
+            raise ValueError(
+                "Reversal requires reference_event_id"
+            )
+
+        original_entry = self.find_entry_by_source_event(
+            event.reference_event_id
+        )
+
+        if original_entry is None:
+            raise ValueError(
+                f"Cannot reverse unknown event: "
+                f"{event.reference_event_id}"
+            )
+
+        if original_entry.account_id != account.account_id:
+            raise ValueError(
+                "Cannot reverse an entry from another account"
+            )
+
+        # replay() has already appended the current reversal event,
+        # so ignore the current event when checking previous reversals.
+        prior_reversal_exists = any(
+            existing_event.event_type == EventType.REVERSAL
+            and existing_event.reference_event_id
+            == event.reference_event_id
+            and existing_event.event_id != event.event_id
+            for existing_event in self.events
+        )
+
+        if prior_reversal_exists:
+            raise ValueError(
+                f"Event {event.reference_event_id} "
+                "has already been reversed"
+            )
+
+        reversal_entry = LedgerEntry(
+            entry_id=f"{event.event_id}-ENTRY",
+            source_event_id=event.event_id,
+            account_id=account.account_id,
+            currency=account.currency,
+            amount=-original_entry.amount,
+            value_day=event.value_day,
+            entry_type=EntryType.REVERSAL,
+        )
+
+        self.entries.append(reversal_entry)

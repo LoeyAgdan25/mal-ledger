@@ -75,3 +75,16 @@ exactly one fee.
 
 Selected chronological daily fee assessment and documented the
 conflicting criterion in REJECTED.md.
+
+## 2026-09-11  6:00
+
+Implemented E8 Auth-B authorization handling after E7 and overdraft
+fees. Auth-B is rejected because available balance would fall below
+zero. Rejected authorization does not create a hold.
+
+Implemented E9 as an append-only compensating reversal of E7.
+E7 remains in the ledger and E9 posts the opposite amount rather than
+mutating or deleting E7.
+
+Documented that reversal does not automatically remove previously
+assessed overdraft fees.

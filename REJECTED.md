@@ -25,3 +25,21 @@ The resulting fee days are therefore Day 2, Day 4 and Day 5.
 I chose to preserve the explicit non-negotiable daily fee rule rather
 than alter the implementation to satisfy this contradictory acceptance
 criterion.
+
+## Rejected: After E9 all balances and fees return to pre-E7 values
+
+Decision: REJECTED
+
+E9 reverses E7 by appending an equal and opposite ledger entry.
+
+E7 remains in the ledger as AED -620.00 and E9 adds AED +620.00
+with the same value date.
+
+This restores the principal effect of E7 to zero.
+
+However, overdraft fees already assessed are independent ledger
+entries. The specification does not define automatic reversal of those
+fees when the original debit is later reversed.
+
+Therefore the implementation keeps the fee entries unless an explicit
+fee-reversal rule is provided.

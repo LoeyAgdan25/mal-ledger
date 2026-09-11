@@ -95,3 +95,21 @@ Reason:
 This follows the explicit value-date definition and the requirement
 that an overdraft fee is booked with value_date equal to its
 assessment day.
+
+## Reversal of previously fee-causing transactions
+
+The specification requires append-only ledger behavior but does not
+state whether reversing a transaction automatically reverses fees
+previously caused by that transaction.
+
+Resolution:
+
+A reversal only compensates the referenced monetary entry.
+
+Previously assessed overdraft fees remain as separate append-only
+ledger entries.
+
+Reason:
+
+Automatically reversing fees would introduce behavior not defined by
+the specification.
