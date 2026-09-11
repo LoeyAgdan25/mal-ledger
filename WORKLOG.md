@@ -15,3 +15,4 @@ Start: 11:25 Sept 11
 Understand the ledger structure and identify domain requirements
 - Review the six day event stream
 - build the structure and requirements ( adding test, Enum classes )
+- add the day 1 event and testing it
