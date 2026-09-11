@@ -38,3 +38,20 @@ a rounding mode. ROUND_HALF_UP was chosen as an explicit,
 deterministic monetary rounding policy.
 
 This decision is also documented in AMBIGUITIES.md.
+
+## Minimum available balance after authorization
+
+Value: 0.
+
+Reason:
+
+The specification states that an authorization is approved if the
+available balance remains "at or above zero" after applying the hold.
+
+Therefore the comparison is:
+
+available_after_hold >= 0
+
+not:
+
+available_after_hold > 0

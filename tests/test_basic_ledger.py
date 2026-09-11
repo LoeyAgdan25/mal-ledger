@@ -2,6 +2,9 @@ from decimal import Decimal
 
 from ledger.money import money
 from run import accounts
+from ledger.engine import LedgerEngine
+from ledger.models import Account, AuthorizationState, Event, EventType
+from ledger.money import money
 
 # test cases for the money function in ledger/money.py
 # test floating point accuracy issues and rounding behavior for different currencies
@@ -29,14 +32,6 @@ def test_two_accounts_use_their_currency_precision():
     assert accounts["ACC-002"].currency == "BHD"
     assert accounts["ACC-001"].opening_balance == Decimal("0.00")
     assert accounts["ACC-002"].opening_balance == Decimal("0.000")
-
-
-from decimal import Decimal
-
-from ledger.engine import LedgerEngine
-from ledger.models import Account, Event, EventType
-from ledger.money import money
-
 
 def create_engine() -> LedgerEngine:
     accounts = {
@@ -118,3 +113,236 @@ def test_balance_uses_value_day_not_posted_day():
 
     assert engine.balance_on("ACC-001", 1) == Decimal("250.00")
     assert engine.balance_on("ACC-001", 2) == Decimal("-370.00")
+
+
+def test_e3_authorization_is_approved():
+    engine = create_engine()
+
+    e1 = Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        )
+
+    e2 = Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        )
+
+    e3 = Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+
+    engine.replay(e1)
+    engine.replay(e2)
+    engine.replay(e3)
+
+    assert len(engine.authorizations) == 1
+
+    auth = engine.authorizations[0]
+
+    assert auth.authorization_id == "Auth-A"
+    assert auth.state == AuthorizationState.APPROVED
+
+
+def test_authorization_hold_reduces_available_not_ledger_balance():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+    )
+
+    assert engine.balance_on("ACC-001", 2) == Decimal("250.00")
+
+    assert engine.active_holds(
+        "ACC-001",
+        2,
+    ) == Decimal("200.00")
+
+    assert engine.available_balance(
+        "ACC-001",
+        2,
+    ) == Decimal("50.00")
+
+
+# reject authorization if balance is negative value
+
+def test_authorization_is_rejected_if_hold_would_make_available_negative():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("100.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="AUTH-1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-Test",
+            amount=Decimal("101.00"),
+        )
+    )
+
+    auth = engine.authorizations[0]
+
+    assert auth.state == AuthorizationState.REJECTED
+
+    assert engine.balance_on(
+        "ACC-001",
+        1,
+    ) == Decimal("100.00")
+
+    assert engine.active_holds(
+        "ACC-001",
+        1,
+    ) == Decimal("0.00")
+
+    assert engine.available_balance(
+        "ACC-001",
+        1,
+    ) == Decimal("100.00")
+
+# test when become exactly zero after authorization hold, it should be approved
+
+def test_authorization_is_approved_when_available_becomes_exactly_zero():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="CREDIT-1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("100.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="AUTH-1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-Zero",
+            amount=Decimal("100.00"),
+        )
+    )
+
+    assert (
+        engine.authorizations[0].state
+        == AuthorizationState.APPROVED
+    )
+
+    assert engine.available_balance(
+        "ACC-001",
+        1,
+    ) == Decimal("0.00")
+
+# adding multiple balance test
+def test_multiple_approved_holds_accumulate():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="CREDIT-1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("500.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="AUTH-1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-1",
+            amount=Decimal("100.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="AUTH-2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-2",
+            amount=Decimal("150.00"),
+        )
+    )
+
+    assert engine.balance_on(
+        "ACC-001",
+        1,
+    ) == Decimal("500.00")
+
+    assert engine.active_holds(
+        "ACC-001",
+        1,
+    ) == Decimal("250.00")
+
+    assert engine.available_balance(
+        "ACC-001",
+        1,
+    ) == Decimal("250.00")

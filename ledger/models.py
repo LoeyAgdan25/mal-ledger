@@ -19,6 +19,10 @@ class EntryType(str, Enum):
     OVERDRAFT_FEE = "OVERDRAFT_FEE"
     INTEREST = "INTEREST"
 
+class AuthorizationState(str, Enum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    SETTLED = "SETTLED"
 
 @dataclass(frozen=True)
 class Account:
@@ -49,3 +53,13 @@ class LedgerEntry:
     amount: Decimal
     value_day: int
     entry_type: EntryType
+
+
+@dataclass(frozen=True)
+class AuthorizationResult:
+    authorization_id: str
+    account_id: str
+    amount: Decimal
+    state: AuthorizationState
+    event_id: str
+    value_day: int
