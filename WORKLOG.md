@@ -37,3 +37,23 @@ Added tests for:
 Decided that authorization state will later be derived from immutable
 authorization and settlement facts rather than mutating an existing
 authorization record.
+
+## 2026-09-11 3:58 GST
+
+Implemented settlement processing.
+
+E5 now:
+- validates Auth-A exists
+- validates it was approved
+- posts the actual AED 185 settlement as a ledger debit
+- derives Auth-A as SETTLED
+- releases the AED 200 hold without mutating the original
+  authorization record
+
+Implemented E6 rejection. An unknown authorization settlement remains
+in the event history and produces a rejected settlement result, but
+does not produce a monetary ledger entry.
+
+Added duplicate settlement protection.
+
+Documented undefined over-capture and partial settlement behavior.

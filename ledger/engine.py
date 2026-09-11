@@ -8,9 +8,9 @@ from ledger.models import (
     EventType,
     EntryType,
     LedgerEntry,
+    SettlementResult,
 )
 from ledger.money import money
-
 
 class LedgerEngine:
     def __init__(self, accounts: dict[str, Account]):
@@ -20,6 +20,7 @@ class LedgerEngine:
         self.events: list[Event] = []
         self.entries: list[LedgerEntry] = []
         self.authorizations: list[AuthorizationResult] = []
+        self.settlements: list[SettlementResult] = []
 
     def replay(self, event: Event) -> None:
         self.events.append(event)
@@ -35,6 +36,8 @@ class LedgerEngine:
         elif event.event_type == EventType.AUTHORIZATION:
             self._process_authorization(event, account)
 
+        elif event.event_type == EventType.SETTLEMENT:
+            self._process_settlement(event, account)
         else:
             raise NotImplementedError(
                 f"{event.event_type} is not implemented yet"
@@ -134,6 +137,8 @@ class LedgerEngine:
 
         return money(balance, account.currency)
 
+    #fix the active holds to be updated when settled
+
     def active_holds(
         self,
         account_id: str,
@@ -148,6 +153,10 @@ class LedgerEngine:
                 authorization.account_id == account_id
                 and authorization.value_day <= day
                 and authorization.state == AuthorizationState.APPROVED
+                and not self.has_settlement(
+                    authorization.authorization_id,
+                    day,
+                )
             ):
                 total += authorization.amount
 
@@ -174,3 +183,152 @@ class LedgerEngine:
             ledger_balance - holds,
             account.currency,
         )
+
+    #find the authorization without mutating
+    def find_authorization(
+        self,
+        authorization_id: str,
+    ) -> AuthorizationResult | None:
+        for authorization in self.authorizations:
+            if authorization.authorization_id == authorization_id:
+                return authorization
+
+        return None
+
+    #  add helper wether authorization is accepted
+    # this determine when it is settled the hold is no longer active
+    def has_settlement(
+        self,
+        authorization_id: str,
+        day: int | None = None,
+    ) -> bool:
+        return any(
+            settlement.authorization_id == authorization_id
+            and settlement.state == "ACCEPTED"
+            and (
+                day is None
+                or settlement.value_day <= day
+            )
+            for settlement in self.settlements
+        )
+
+    #process the settlement
+    def _process_settlement(
+        self,
+        event: Event,
+        account: Account,
+    ) -> None:
+        if event.amount is None:
+            raise ValueError("Settlement requires an amount")
+
+        if event.authorization_id is None:
+            raise ValueError(
+                "Settlement requires authorization_id"
+            )
+
+        authorization = self.find_authorization(
+            event.authorization_id
+        )
+
+        if authorization is None:
+            self.settlements.append(
+                SettlementResult(
+                    authorization_id=event.authorization_id,
+                    account_id=account.account_id,
+                    amount=money(
+                        event.amount,
+                        account.currency,
+                    ),
+                    state="REJECTED",
+                    event_id=event.event_id,
+                    value_day=event.value_day,
+                    error="UNKNOWN_AUTHORIZATION",
+                )
+            )
+
+            return
+
+        if authorization.state != AuthorizationState.APPROVED:
+            self.settlements.append(
+                SettlementResult(
+                    authorization_id=event.authorization_id,
+                    account_id=account.account_id,
+                    amount=money(
+                        event.amount,
+                        account.currency,
+                    ),
+                    state="REJECTED",
+                    event_id=event.event_id,
+                    value_day=event.value_day,
+                    error="AUTHORIZATION_NOT_APPROVED",
+                )
+            )
+
+            return
+
+        if self.has_settlement(event.authorization_id):
+            self.settlements.append(
+                SettlementResult(
+                    authorization_id=event.authorization_id,
+                    account_id=account.account_id,
+                    amount=money(
+                        event.amount,
+                        account.currency,
+                    ),
+                    state="REJECTED",
+                    event_id=event.event_id,
+                    value_day=event.value_day,
+                    error="ALREADY_SETTLED",
+                )
+            )
+            return
+
+        settlement_amount = money(
+            event.amount,
+            account.currency,
+        )
+
+        entry = LedgerEntry(
+            entry_id=f"{event.event_id}-ENTRY",
+            source_event_id=event.event_id,
+            account_id=account.account_id,
+            currency=account.currency,
+            amount=-settlement_amount,
+            value_day=event.value_day,
+            entry_type=EntryType.SETTLEMENT,
+        )
+
+        self.entries.append(entry)
+
+        self.settlements.append(
+            SettlementResult(
+                authorization_id=event.authorization_id,
+                account_id=account.account_id,
+                amount=settlement_amount,
+                state="ACCEPTED",
+                event_id=event.event_id,
+                value_day=event.value_day,
+                error=None,
+            )
+        )
+
+    # Derived current authorization state.
+    # The original authorization fact remains immutable.
+    def authorization_state(
+        self,
+        authorization_id: str,
+    ) -> AuthorizationState | None:
+        authorization = self.find_authorization(
+            authorization_id
+        )
+
+        if authorization is None:
+            return None
+
+        if authorization.state == AuthorizationState.REJECTED:
+            return AuthorizationState.REJECTED
+
+        if self.has_settlement(authorization_id):
+            return AuthorizationState.SETTLED
+
+        return AuthorizationState.APPROVED

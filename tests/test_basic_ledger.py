@@ -346,3 +346,253 @@ def test_multiple_approved_holds_accumulate():
         "ACC-001",
         1,
     ) == Decimal("250.00")
+
+
+# test settlement and release the hold and update the ledger balance accordingly
+def test_auth_a_settlement_is_accepted_and_releases_hold():
+    engine = create_engine()
+
+    events = [
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        ),
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        ),
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        ),
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        ),
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        ),
+    ]
+
+    for event in events:
+        engine.replay(event)
+
+    assert engine.balance_on(
+        "ACC-001",
+        3,
+    ) == Decimal("650.00")
+
+    assert engine.balance_on(
+        "ACC-001",
+        4,
+    ) == Decimal("465.00")
+
+    assert engine.active_holds(
+        "ACC-001",
+        4,
+    ) == Decimal("0.00")
+
+    assert engine.available_balance(
+        "ACC-001",
+        4,
+    ) == Decimal("465.00")
+
+    settlement = engine.settlements[0]
+
+    assert settlement.state == "ACCEPTED"
+    assert settlement.amount == Decimal("185.00")
+
+# Test that the hold amount was 200 but settlement is only 185
+# only settlement happens without an authorization
+def test_settlement_posts_actual_amount_not_hold_amount():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("250.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        )
+    )
+
+    assert engine.balance_on(
+        "ACC-001",
+        4,
+    ) == Decimal("65.00")
+
+    assert engine.active_holds(
+        "ACC-001",
+        4,
+    ) == Decimal("0.00")
+
+# Invalidating Event 6 here.
+
+def test_unknown_authorization_settlement_is_rejected():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("500.00"),
+        )
+    )
+
+    balance_before = engine.balance_on(
+        "ACC-001",
+        4,
+    )
+
+    engine.replay(
+        Event(
+            event_id="E6",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-Z",
+            amount=Decimal("180.00"),
+        )
+    )
+
+    balance_after = engine.balance_on(
+        "ACC-001",
+        4,
+    )
+
+    assert balance_before == Decimal("500.00")
+    assert balance_after == Decimal("500.00")
+
+    settlement = engine.settlements[0]
+
+    assert settlement.state == "REJECTED"
+    assert settlement.error == "UNKNOWN_AUTHORIZATION"
+
+# proves settlement has been rejected
+
+def test_rejected_unknown_settlement_creates_no_ledger_entry():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E6",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-Z",
+            amount=Decimal("180.00"),
+        )
+    )
+
+    assert len(engine.events) == 1
+    assert len(engine.settlements) == 1 # settlement happens
+    assert len(engine.entries) == 0 # no ledger entry produce
+
+
+def test_auth_a_current_state_is_derived_as_settled():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("500.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+    )
+
+    assert (
+        engine.authorization_state("Auth-A")
+        == AuthorizationState.APPROVED
+    )
+
+    engine.replay(
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        )
+    )
+
+    assert (
+        engine.authorization_state("Auth-A")
+        == AuthorizationState.SETTLED
+    )
+
+    # Original authorization fact has not changed.
+    assert (
+        engine.authorizations[0].state
+        == AuthorizationState.APPROVED
+    )

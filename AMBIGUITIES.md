@@ -36,3 +36,20 @@ Reason:
 Changing an authorization record from APPROVED to SETTLED would make
 the implementation stateful through mutation and would obscure the
 history that produced the final result.
+
+## Settlement amount greater than authorization hold
+
+The specification demonstrates an authorization for AED 200 followed
+by settlement for AED 185, but does not define whether a settlement
+may exceed its original authorization amount.
+
+Resolution:
+
+The current implementation does not add a separate over-capture rule
+because none is required by the supplied event stream.
+
+
+Reason:
+
+Rejecting or accepting over-capture without a specification would add
+domain behavior that was not requested.

@@ -63,3 +63,13 @@ class AuthorizationResult:
     state: AuthorizationState
     event_id: str
     value_day: int
+
+@dataclass(frozen=True)
+class SettlementResult:
+    authorization_id: str
+    account_id: str
+    amount: Decimal
+    state: str
+    event_id: str
+    value_day: int
+    error: str | None = None
