@@ -22,3 +22,42 @@ def money(value: str | Decimal, currency: str) -> Decimal:
         CURRENCY_PRECISION[currency],
         rounding=ROUND_HALF_UP,
     )
+
+# add generic amount splitter / this calculate exactly the amount
+
+def split_amount(
+    value: str | Decimal,
+    currency: str,
+    count: int,
+) -> list[Decimal]:
+    if count <= 0:
+        raise ValueError(
+            "Installment count must be greater than zero"
+        )
+
+    total = money(value, currency)
+    precision = CURRENCY_PRECISION[currency]
+
+    minor_units = int(total / precision)
+
+    base_units, remainder = divmod(
+        minor_units,
+        count,
+    )
+
+    parts: list[Decimal] = []
+
+    for index in range(count):
+        units = base_units
+
+        if index < remainder:
+            units += 1
+
+        part = money(
+            Decimal(units) * precision,
+            currency,
+        )
+
+        parts.append(part)
+
+    return parts

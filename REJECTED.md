@@ -43,3 +43,28 @@ fees when the original debit is later reversed.
 
 Therefore the implementation keeps the fee entries unless an explicit
 fee-reversal rule is provided.
+
+## Rejected: all three BHD installments are BHD 3.334
+
+Decision: REJECTED
+
+The specification requires BHD amounts to use three decimal places
+and E10 to total exactly BHD 10.000.
+
+Three installments of BHD 3.334 would produce:
+
+3.334 + 3.334 + 3.334 = 10.002
+
+This exceeds the original amount by BHD 0.002.
+
+The implementation therefore distributes the indivisible minor-unit
+remainder deterministically:
+
+- BHD 3.334
+- BHD 3.333
+- BHD 3.333
+
+Total: BHD 10.000.
+
+The earliest installment receives the remainder. This preserves both
+currency precision and the exact event amount.

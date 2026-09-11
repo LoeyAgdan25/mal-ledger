@@ -1,10 +1,12 @@
+import pytest
+
 from decimal import Decimal
 
 from ledger.money import money
 from run import accounts
 from ledger.engine import LedgerEngine
 from ledger.models import Account, AuthorizationState, Event, EventType, EntryType
-from ledger.money import money
+from ledger.money import money, split_amount
 
 # test cases for the money function in ledger/money.py
 # test floating point accuracy issues and rounding behavior for different currencies
@@ -1105,3 +1107,123 @@ def test_e8_auth_b_is_rejected_when_available_balance_is_negative():
         "ACC-001",
         5,
     ) == Decimal("-230.00")
+
+#test splitting money account / need to do this for the precscion and accuracy / fills
+def test_bhd_10_is_split_exactly_into_three_installments():
+    parts = split_amount(
+        Decimal("10.000"),
+        "BHD",
+        3,
+    )
+
+    assert parts == [
+        Decimal("3.334"),
+        Decimal("3.333"),
+        Decimal("3.333"),
+    ]
+
+    assert sum(parts) == Decimal("10.000")
+
+# test epp amount equal for installment or bnpl
+def test_e10_posts_bhd_10_as_three_installments():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E10",
+            posted_day=5,
+            value_day=5,
+            account_id="ACC-002",
+            event_type=EventType.CREDIT,
+            amount=Decimal("10.000"),
+            installment_count=3,
+        )
+    )
+
+    e10_entries = [
+        entry
+        for entry in engine.entries
+        if entry.source_event_id == "E10"
+    ]
+
+    assert len(e10_entries) == 3
+
+    assert [
+        entry.amount
+        for entry in e10_entries
+    ] == [
+        Decimal("3.334"),
+        Decimal("3.333"),
+        Decimal("3.333"),
+    ]
+
+    assert engine.balance_on(
+        "ACC-002",
+        5,
+    ) == Decimal("10.000")
+
+
+# e10 test make sure immutable event journal doesn't magically contains three events
+# event is not equal to ledger
+
+def test_e10_is_one_event_with_three_ledger_entries():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E10",
+            posted_day=5,
+            value_day=5,
+            account_id="ACC-002",
+            event_type=EventType.CREDIT,
+            amount=Decimal("10.000"),
+            installment_count=3,
+        )
+    )
+
+    assert len(engine.events) == 1
+
+    e10_entries = [
+        entry
+        for entry in engine.entries
+        if entry.source_event_id == "E10"
+    ]
+
+    assert len(e10_entries) == 3
+
+# documenting contradiction a required
+
+@pytest.mark.intentional_failure
+def test_spec_claim_that_all_three_bhd_installments_are_3_334():
+    """
+    INTENTIONAL FAILURE.
+
+    This test represents the acceptance criterion claiming that
+    all three installments of BHD 10.000 should equal BHD 3.334.
+
+    That is impossible while preserving the required three-decimal
+    BHD precision and the exact original total:
+
+        3.334 + 3.334 + 3.334 = 10.002
+
+    The implemented deterministic allocation is:
+
+        3.334 + 3.333 + 3.333 = 10.000
+
+    This failing test is intentionally retained because the
+    assessment explicitly requests one failing test that exposes
+    a design conflict.
+    """
+
+    parts = split_amount(
+        Decimal("10.000"),
+        "BHD",
+        3,
+    )
+
+    assert parts == [
+        Decimal("3.334"),
+        Decimal("3.334"),
+        Decimal("3.334"),
+    ]
+

@@ -38,10 +38,10 @@ class Event:
     value_day: int
     account_id: str
     event_type: EventType
-
     amount: Decimal | None = None
     authorization_id: str | None = None
     reference_event_id: str | None = None
+    installment_count: int = 1
 
 
 @dataclass(frozen=True)

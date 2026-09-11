@@ -10,7 +10,7 @@ from ledger.models import (
     LedgerEntry,
     SettlementResult,
 )
-from ledger.money import money, OVERDRAFT_FEE_AED
+from ledger.money import money, OVERDRAFT_FEE_AED, split_amount
 
 class LedgerEngine:
     def __init__(self, accounts: dict[str, Account]):
@@ -55,17 +55,51 @@ class LedgerEngine:
         if event.amount is None:
             raise ValueError("Credit requires an amount")
 
-        entry = LedgerEntry(
-            entry_id=f"{event.event_id}-ENTRY",
-            source_event_id=event.event_id,
-            account_id=account.account_id,
-            currency=account.currency,
-            amount=money(event.amount, account.currency),
-            value_day=event.value_day,
-            entry_type=EntryType.CREDIT,
+        if event.installment_count <= 0:
+            raise ValueError(
+                "Installment count must be greater than zero"
+            )
+
+        # Normal credit
+        if event.installment_count == 1:
+            entry = LedgerEntry(
+                entry_id=f"{event.event_id}-ENTRY",
+                source_event_id=event.event_id,
+                account_id=account.account_id,
+                currency=account.currency,
+                amount=money(
+                    event.amount,
+                    account.currency,
+                ),
+                value_day=event.value_day,
+                entry_type=EntryType.CREDIT,
+            )
+
+            self.entries.append(entry)
+            return
+
+        # Installment credit
+        installments = split_amount(
+            event.amount,
+            account.currency,
+            event.installment_count,
         )
 
-        self.entries.append(entry)
+        for index, installment in enumerate(
+            installments,
+            start=1,
+        ):
+            entry = LedgerEntry(
+                entry_id=f"{event.event_id}-ENTRY-{index}",
+                source_event_id=event.event_id,
+                account_id=account.account_id,
+                currency=account.currency,
+                amount=installment,
+                value_day=event.value_day,
+                entry_type=EntryType.CREDIT,
+            )
+
+            self.entries.append(entry)
 
     def _post_debit(
         self,

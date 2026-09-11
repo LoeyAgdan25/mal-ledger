@@ -113,3 +113,29 @@ Reason:
 
 Automatically reversing fees would introduce behavior not defined by
 the specification.
+
+## Equal installment allocation when currency precision prevents equality
+
+The specification describes E10 as BHD 10.000 posted as three equal
+installments.
+
+At BHD three-decimal precision, BHD 10.000 cannot be divided into
+three exactly equal representable amounts.
+
+Resolution:
+
+Amounts are converted to minor currency units before division.
+
+Any indivisible remainder is allocated deterministically to the
+earliest installments.
+
+For E10 the resulting postings are:
+
+- BHD 3.334
+- BHD 3.333
+- BHD 3.333
+
+Reason:
+
+This preserves the exact original total and currency precision while
+remaining deterministic.
