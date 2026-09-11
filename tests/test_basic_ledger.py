@@ -80,3 +80,41 @@ def test_day_1_balance_after_e1_and_e2():
     engine.replay(e2)
 
     assert engine.balance_on("ACC-001", 1) == Decimal("250.00")
+
+    # testing that proves value date matters
+def test_balance_uses_value_day_not_posted_day():
+    engine = create_engine()
+
+    e1 = Event(
+        event_id="E1",
+        posted_day=1,
+        value_day=1,
+        account_id="ACC-001",
+        event_type=EventType.CREDIT,
+        amount=Decimal("1200.00"),
+    )
+
+    e2 = Event(
+        event_id="E2",
+        posted_day=1,
+        value_day=1,
+        account_id="ACC-001",
+        event_type=EventType.DEBIT,
+        amount=Decimal("950.00"),
+    )
+
+    e7 = Event(
+        event_id="E7",
+        posted_day=5,
+        value_day=2,
+        account_id="ACC-001",
+        event_type=EventType.DEBIT,
+        amount=Decimal("620.00"),
+    )
+
+    engine.replay(e1)
+    engine.replay(e2)
+    engine.replay(e7)
+
+    assert engine.balance_on("ACC-001", 1) == Decimal("250.00")
+    assert engine.balance_on("ACC-001", 2) == Decimal("-370.00")
