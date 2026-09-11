@@ -53,3 +53,45 @@ Reason:
 
 Rejecting or accepting over-capture without a specification would add
 domain behavior that was not requested.
+
+## Duplicate settlement of one authorization
+
+The specification does not state whether the same authorization can
+settle more than once.
+
+Resolution:
+
+Only one accepted settlement is permitted per authorization in this
+implementation.
+
+A later settlement against the same already-settled authorization is
+rejected with ALREADY_SETTLED.
+
+Reason:
+
+The supplied event model describes a single authorization followed by
+a settlement. Accepting multiple settlements would require explicit
+partial-capture semantics that are not defined.
+
+## Retroactive overdraft assessment
+
+E7 is posted on Day 5 but has value_date Day 2.
+
+The specification defines closing ledger balance using entries whose
+value_date is less than or equal to the evaluated day, but does not
+fully specify how a newly discovered backdated transaction interacts
+with previously evaluated fee days.
+
+Resolution:
+
+When a backdated event changes historical closing balances, affected
+days are reevaluated chronologically.
+
+Fees are ledger entries themselves and therefore participate in the
+closing balances of subsequent days.
+
+Reason:
+
+This follows the explicit value-date definition and the requirement
+that an overdraft fee is booked with value_date equal to its
+assessment day.

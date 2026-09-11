@@ -55,3 +55,20 @@ available_after_hold >= 0
 not:
 
 available_after_hold > 0
+
+## Overdraft fee
+
+Value: AED 25.00.
+
+Reason:
+Explicitly specified by the assessment.
+
+
+## Overdraft threshold
+
+Value: closing ledger balance < AED 0.00.
+
+Reason:
+The fee applies when the closing ledger balance is negative.
+
+A zero closing balance therefore does not incur a fee.

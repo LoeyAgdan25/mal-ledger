@@ -10,7 +10,7 @@ from ledger.models import (
     LedgerEntry,
     SettlementResult,
 )
-from ledger.money import money
+from ledger.money import money, OVERDRAFT_FEE_AED
 
 class LedgerEngine:
     def __init__(self, accounts: dict[str, Account]):
@@ -332,3 +332,63 @@ class LedgerEngine:
             return AuthorizationState.SETTLED
 
         return AuthorizationState.APPROVED
+
+    # Check condition if there is overdraft fee
+    def has_overdraft_fee(
+        self,
+        account_id: str,
+        day: int,
+    ) -> bool:
+        return any(
+            entry.account_id == account_id
+            and entry.value_day == day
+            and entry.entry_type == EntryType.OVERDRAFT_FEE
+            for entry in self.entries
+        )
+
+    # Assest the overdraft fee if the available balance is negative and no overdraft fee has been applied yet
+    def assess_overdraft_fee(
+        self,
+        account_id: str,
+        day: int,
+    ) -> None:
+        account = self.accounts[account_id]
+
+        if account.currency != "AED":
+            return
+
+        if self.has_overdraft_fee(account_id, day):
+            return
+
+        closing_balance = self.balance_on(
+            account_id,
+            day,
+        )
+
+        if closing_balance >= Decimal("0"):
+            return
+
+        fee_entry = LedgerEntry(
+            entry_id=f"FEE-{account_id}-D{day}",
+            source_event_id=f"SYSTEM-FEE-D{day}",
+            account_id=account_id,
+            currency=account.currency,
+            amount=-OVERDRAFT_FEE_AED,
+            value_day=day, #value_date to the day assessed
+            entry_type=EntryType.OVERDRAFT_FEE,
+        )
+
+        self.entries.append(fee_entry)
+
+    # this assest overdraft fees for all days up to the specified day. for critical accounting details
+
+    def assess_overdraft_fees_through(
+        self,
+        account_id: str,
+        through_day: int,
+    ) -> None:
+        for day in range(1, through_day + 1):
+            self.assess_overdraft_fee(
+                account_id,
+                day,
+            )

@@ -3,7 +3,7 @@ from decimal import Decimal
 from ledger.money import money
 from run import accounts
 from ledger.engine import LedgerEngine
-from ledger.models import Account, AuthorizationState, Event, EventType
+from ledger.models import Account, AuthorizationState, Event, EventType, EntryType
 from ledger.money import money
 
 # test cases for the money function in ledger/money.py
@@ -596,3 +596,303 @@ def test_auth_a_current_state_is_derived_as_settled():
         engine.authorizations[0].state
         == AuthorizationState.APPROVED
     )
+
+# balance are value dated here...
+def test_e7_retroactively_changes_day_2_balance_to_negative_370():
+    engine = create_engine()
+
+    events = [
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        ),
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        ),
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        ),
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        ),
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        ),
+        Event(
+            event_id="E7",
+            posted_day=5,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("620.00"),
+        ),
+    ]
+
+    for event in events:
+        engine.replay(event)
+
+    assert engine.balance_on(
+        "ACC-001",
+        1,
+    ) == Decimal("250.00")
+
+    assert engine.balance_on(
+        "ACC-001",
+        2,
+    ) == Decimal("-370.00")
+
+
+# test all value dated balance
+
+def test_e7_changes_later_value_dated_balances():
+    engine = create_engine()
+
+    events = [
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        ),
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        ),
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        ),
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        ),
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        ),
+        Event(
+            event_id="E7",
+            posted_day=5,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("620.00"),
+        ),
+    ]
+
+    for event in events:
+        engine.replay(event)
+
+    assert engine.balance_on("ACC-001", 1) == Decimal("250.00")
+    assert engine.balance_on("ACC-001", 2) == Decimal("-370.00")
+    assert engine.balance_on("ACC-001", 3) == Decimal("30.00")
+    assert engine.balance_on("ACC-001", 4) == Decimal("-155.00")
+    assert engine.balance_on("ACC-001", 5) == Decimal("-155.00")
+
+# test the assested fees
+def test_negative_day_2_balance_assesses_aed_25_fee():
+        engine = create_engine()
+
+        engine.replay(
+            Event(
+                event_id="E1",
+                posted_day=1,
+                value_day=1,
+                account_id="ACC-001",
+                event_type=EventType.CREDIT,
+                amount=Decimal("250.00"),
+            )
+        )
+
+        engine.replay(
+            Event(
+                event_id="E7",
+                posted_day=5,
+                value_day=2,
+                account_id="ACC-001",
+                event_type=EventType.DEBIT,
+                amount=Decimal("620.00"),
+            )
+        )
+
+        assert engine.balance_on(
+            "ACC-001",
+            2,
+        ) == Decimal("-370.00")
+
+        engine.assess_overdraft_fee(
+            "ACC-001",
+            2,
+        )
+
+        assert engine.balance_on(
+            "ACC-001",
+            2,
+        ) == Decimal("-395.00")
+
+# test overdraft fee one per day behavior
+
+def test_overdraft_fee_is_assessed_only_once_per_day():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("100.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="D1",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("200.00"),
+        )
+    )
+
+    engine.assess_overdraft_fee("ACC-001", 2)
+    engine.assess_overdraft_fee("ACC-001", 2)
+    engine.assess_overdraft_fee("ACC-001", 2)
+
+    fee_entries = [
+        entry
+        for entry in engine.entries
+        if entry.entry_type == EntryType.OVERDRAFT_FEE
+    ]
+
+    assert len(fee_entries) == 1
+
+    assert fee_entries[0].amount == Decimal("-25.00")
+
+# test the balance for accuracy and not including days without overdraft fees
+def test_e7_recalculation_assesses_fees_on_negative_closing_days():
+    engine = create_engine()
+
+    events = [
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        ),
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        ),
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        ),
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        ),
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        ),
+        Event(
+            event_id="E7",
+            posted_day=5,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("620.00"),
+        ),
+    ]
+
+    for event in events:
+        engine.replay(event)
+
+    # Acceptance criterion explicitly asks for the balance
+    # before any fee is assessed.
+    assert engine.balance_on(
+        "ACC-001",
+        2,
+    ) == Decimal("-370.00")
+
+    engine.assess_overdraft_fees_through(
+        "ACC-001",
+        5,
+    )
+
+    fee_days = [
+        entry.value_day
+        for entry in engine.entries
+        if entry.entry_type == EntryType.OVERDRAFT_FEE
+    ]
+
+    assert fee_days == [2, 4, 5]

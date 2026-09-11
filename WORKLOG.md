@@ -57,3 +57,21 @@ does not produce a monetary ledger entry.
 Added duplicate settlement protection.
 
 Documented undefined over-capture and partial settlement behavior.
+
+## 2026-09-11  5:25
+
+Implemented backdated debit behavior for E7.
+
+Verified that E7 is posted on Day 5 but changes the Day 2 closing
+ledger balance to AED -370.00 because balance calculation is based
+on value_date.
+
+Implemented once-per-day overdraft assessment as append-only ledger
+entries.
+
+During implementation, identified a conflict between the explicit
+daily overdraft rule and the acceptance criterion claiming E7 causes
+exactly one fee.
+
+Selected chronological daily fee assessment and documented the
+conflicting criterion in REJECTED.md.
