@@ -7,6 +7,7 @@ CURRENCY_PRECISION = {
 }
 
 OVERDRAFT_FEE_AED = Decimal("25.00")
+DAILY_INTEREST_RATE = Decimal("0.0004")
 
 def money(value: str | Decimal, currency: str) -> Decimal:
     """

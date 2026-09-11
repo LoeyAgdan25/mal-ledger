@@ -9,8 +9,9 @@ from ledger.models import (
     EntryType,
     LedgerEntry,
     SettlementResult,
+    InterestAccrual,
 )
-from ledger.money import money, OVERDRAFT_FEE_AED, split_amount
+from ledger.money import money, OVERDRAFT_FEE_AED, split_amount, DAILY_INTEREST_RATE
 
 class LedgerEngine:
     def __init__(self, accounts: dict[str, Account]):
@@ -21,6 +22,7 @@ class LedgerEngine:
         self.entries: list[LedgerEntry] = []
         self.authorizations: list[AuthorizationResult] = []
         self.settlements: list[SettlementResult] = []
+        self.interest_accruals: list[InterestAccrual] = []
 
     def replay(self, event: Event) -> None:
         self.events.append(event)
@@ -507,3 +509,119 @@ class LedgerEngine:
         )
 
         self.entries.append(reversal_entry)
+
+    # Add Interest calculation to closing positive balance
+    def accrue_daily_interest(
+        self,
+        account_id: str,
+        day: int,
+    ) -> InterestAccrual:
+        existing = self.find_interest_accrual(
+            account_id,
+            day,
+        )
+
+        if existing is not None:
+            return existing
+
+        account = self.accounts[account_id]
+
+        balance = self.balance_on(
+            account_id,
+            day,
+        )
+
+        if balance <= Decimal("0"):
+            interest = money(
+                Decimal("0"),
+                account.currency,
+            )
+        else:
+            interest = money(
+                balance * DAILY_INTEREST_RATE,
+                account.currency,
+            )
+
+        accrual = InterestAccrual(
+            account_id=account_id,
+            day=day,
+            balance=balance,
+            amount=interest,
+        )
+
+        self.interest_accruals.append(accrual)
+        return accrual
+
+    # replay and tests may call the function more than once
+    def find_interest_accrual(
+        self,
+        account_id: str,
+        day: int,
+    ) -> InterestAccrual | None:
+        for accrual in self.interest_accruals:
+            if (
+                accrual.account_id == account_id
+                and accrual.day == day
+            ):
+                return accrual
+
+        return None
+
+    # accrue interest for day 6
+    def accrue_interest_through(
+        self,
+        account_id: str,
+        through_day: int,
+    ) -> None:
+        for day in range(1, through_day + 1):
+            self.accrue_daily_interest(
+                account_id,
+                day,
+            )
+
+    def capitalize_interest(
+        self,
+        account_id: str,
+        day: int = 6,
+    ) -> None:
+        account = self.accounts[account_id]
+        
+        #critical accounting rule. do not calculate unrounded total and round afterward.
+        total = sum(
+            (
+                accrual.amount
+                for accrual in self.interest_accruals
+                if accrual.account_id == account_id
+                and accrual.day <= day
+            ),
+            Decimal("0"),
+        )
+
+        total = money(
+            total,
+            account.currency,
+        )
+
+        if total == Decimal("0"):
+            return
+
+        already_capitalized = any(
+            entry.account_id == account_id
+            and entry.entry_type == EntryType.INTEREST
+            for entry in self.entries
+        )
+
+        if already_capitalized:
+            return
+
+        entry = LedgerEntry(
+            entry_id=f"INTEREST-{account_id}-D{day}",
+            source_event_id=f"SYSTEM-INTEREST-D{day}",
+            account_id=account_id,
+            currency=account.currency,
+            amount=total,
+            value_day=day,
+            entry_type=EntryType.INTEREST,
+        )
+
+        self.entries.append(entry)

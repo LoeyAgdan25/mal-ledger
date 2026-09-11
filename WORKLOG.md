@@ -88,3 +88,25 @@ mutating or deleting E7.
 
 Documented that reversal does not automatically remove previously
 assessed overdraft fees.
+
+
+## 2026-09-11  6:38
+
+Implemented E10 BHD installment handling.
+
+Extended a credit event so one immutable event may generate multiple
+ledger entries.
+
+Implemented minor-unit installment allocation rather than dividing
+Decimal values and independently rounding each result.
+
+BHD 10.000 split across three postings produces BHD 3.334,
+BHD 3.333 and BHD 3.333, preserving the exact BHD 10.000 total.
+
+Added an intentional failing test demonstrating why the acceptance
+criterion requiring three BHD 3.334 installments is mathematically
+incompatible with the required total and BHD precision.
+
+## 2026-09-11  8:00 
+
+Implemented Accrual interest

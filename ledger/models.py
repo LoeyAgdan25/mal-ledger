@@ -73,3 +73,10 @@ class SettlementResult:
     event_id: str
     value_day: int
     error: str | None = None
+
+@dataclass(frozen=True)
+class InterestAccrual:
+    account_id: str
+    day: int
+    balance: Decimal
+    amount: Decimal

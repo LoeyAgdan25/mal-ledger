@@ -68,3 +68,22 @@ Total: BHD 10.000.
 
 The earliest installment receives the remainder. This preserves both
 currency precision and the exact event amount.
+
+## Rejected: discard any interest rounding remainder
+
+Decision: REJECTED.
+
+The specification explicitly requires the rounded daily accruals to
+sum exactly to the capitalized interest amount.
+
+The implementation therefore calculates and rounds each day's
+interest first, then sums those rounded values.
+
+No remainder is discarded.
+
+For ACC-001:
+
+0.10 + 0.09 + 0.25 + 0.17 + 0.16 + 0.16 = AED 0.93
+
+The Day 6 capitalization entry is therefore exactly AED 0.93.
+

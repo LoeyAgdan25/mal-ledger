@@ -5,7 +5,7 @@ from decimal import Decimal
 from ledger.money import money
 from run import accounts
 from ledger.engine import LedgerEngine
-from ledger.models import Account, AuthorizationState, Event, EventType, EntryType
+from ledger.models import Account, AuthorizationState, Event, EventType, EntryType, LedgerEntry
 from ledger.money import money, split_amount
 
 # test cases for the money function in ledger/money.py
@@ -1227,3 +1227,275 @@ def test_spec_claim_that_all_three_bhd_installments_are_3_334():
         Decimal("3.334"),
     ]
 
+
+# test for daily interest (0.0004)
+def test_acc001_daily_interest_is_rounded_per_day():
+    engine = create_engine()
+
+    # Build the same state after E9 and the retained fees.
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("1200.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E2",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("950.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E3",
+            posted_day=2,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.AUTHORIZATION,
+            authorization_id="Auth-A",
+            amount=Decimal("200.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E4",
+            posted_day=3,
+            value_day=3,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("400.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E5",
+            posted_day=4,
+            value_day=4,
+            account_id="ACC-001",
+            event_type=EventType.SETTLEMENT,
+            authorization_id="Auth-A",
+            amount=Decimal("185.00"),
+        )
+    )
+
+    engine.replay(
+        Event(
+            event_id="E7",
+            posted_day=5,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.DEBIT,
+            amount=Decimal("620.00"),
+        )
+    )
+
+    engine.assess_overdraft_fees_through(
+        "ACC-001",
+        5,
+    )
+
+    engine.replay(
+        Event(
+            event_id="E9",
+            posted_day=6,
+            value_day=2,
+            account_id="ACC-001",
+            event_type=EventType.REVERSAL,
+            reference_event_id="E7",
+        )
+    )
+
+    engine.accrue_interest_through(
+        "ACC-001",
+        6,
+    )
+
+    amounts = [
+        accrual.amount
+        for accrual in engine.interest_accruals
+        if accrual.account_id == "ACC-001"
+    ]
+
+    assert amounts == [
+        Decimal("0.10"),
+        Decimal("0.09"),
+        Decimal("0.25"),
+        Decimal("0.17"),
+        Decimal("0.16"),
+        Decimal("0.16"),
+    ]
+
+# capitalisation 
+def test_acc001_interest_is_capitalized_once_on_day_6():
+    engine = create_engine()
+
+    # Create final reconstructed balances directly through postings.
+
+    engine.replay(
+        Event(
+            event_id="E1",
+            posted_day=1,
+            value_day=1,
+            account_id="ACC-001",
+            event_type=EventType.CREDIT,
+            amount=Decimal("250.00"),
+        )
+    )
+
+    # Synthetic postings to create the expected closing balances
+    # are not ideal for the full integration test, but this isolates
+    # interest behavior.
+
+    engine.entries.extend([
+        LedgerEntry(
+            entry_id="T-D2",
+            source_event_id="TEST",
+            account_id="ACC-001",
+            currency="AED",
+            amount=Decimal("-25.00"),
+            value_day=2,
+            entry_type=EntryType.OVERDRAFT_FEE,
+        ),
+        LedgerEntry(
+            entry_id="T-D3",
+            source_event_id="TEST",
+            account_id="ACC-001",
+            currency="AED",
+            amount=Decimal("400.00"),
+            value_day=3,
+            entry_type=EntryType.CREDIT,
+        ),
+        LedgerEntry(
+            entry_id="T-D4-SETTLE",
+            source_event_id="TEST",
+            account_id="ACC-001",
+            currency="AED",
+            amount=Decimal("-185.00"),
+            value_day=4,
+            entry_type=EntryType.SETTLEMENT,
+        ),
+        LedgerEntry(
+            entry_id="T-D4-FEE",
+            source_event_id="TEST",
+            account_id="ACC-001",
+            currency="AED",
+            amount=Decimal("-25.00"),
+            value_day=4,
+            entry_type=EntryType.OVERDRAFT_FEE,
+        ),
+        LedgerEntry(
+            entry_id="T-D5-FEE",
+            source_event_id="TEST",
+            account_id="ACC-001",
+            currency="AED",
+            amount=Decimal("-25.00"),
+            value_day=5,
+            entry_type=EntryType.OVERDRAFT_FEE,
+        ),
+    ])
+
+    engine.accrue_interest_through(
+        "ACC-001",
+        6,
+    )
+
+    engine.capitalize_interest(
+        "ACC-001",
+        6,
+    )
+
+    interest_entries = [
+        entry
+        for entry in engine.entries
+        if entry.entry_type == EntryType.INTEREST
+    ]
+
+    assert len(interest_entries) == 1
+
+    assert (
+        interest_entries[0].amount
+        == Decimal("0.93")
+    )
+
+    assert (
+        interest_entries[0].value_day
+        == 6
+    )
+
+# Test Account 2 Interest for E10
+def test_acc002_bhd_interest_is_capitalized_on_day_6():
+    engine = create_engine()
+
+    engine.replay(
+        Event(
+            event_id="E10",
+            posted_day=5,
+            value_day=5,
+            account_id="ACC-002",
+            event_type=EventType.CREDIT,
+            amount=Decimal("10.000"),
+            installment_count=3,
+        )
+    )
+
+    engine.accrue_interest_through(
+        "ACC-002",
+        6,
+    )
+
+    accruals = [
+        accrual.amount
+        for accrual in engine.interest_accruals
+        if accrual.account_id == "ACC-002"
+    ]
+
+    assert accruals == [
+        Decimal("0.000"),
+        Decimal("0.000"),
+        Decimal("0.000"),
+        Decimal("0.000"),
+        Decimal("0.004"),
+        Decimal("0.004"),
+    ]
+
+    engine.capitalize_interest(
+        "ACC-002",
+        6,
+    )
+
+    interest_entries = [
+        entry
+        for entry in engine.entries
+        if (
+            entry.account_id == "ACC-002"
+            and entry.entry_type == EntryType.INTEREST
+        )
+    ]
+
+    assert len(interest_entries) == 1
+
+    assert (
+        interest_entries[0].amount
+        == Decimal("0.008")
+    )
+
+    assert (
+        engine.balance_on(
+            "ACC-002",
+            6,
+        )
+        == Decimal("10.008")
+    )

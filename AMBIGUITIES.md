@@ -139,3 +139,54 @@ Reason:
 
 This preserves the exact original total and currency precision while
 remaining deterministic.
+
+
+## E10 installment count
+
+Value: 3.
+
+Reason:
+Explicitly specified by the supplied event stream.
+
+Why not half:
+The number is input from the assessment rather than a design-selected
+business constant.
+
+## BHD smallest unit
+
+Value: BHD 0.001.
+
+Reason:
+The specification defines BHD precision as three decimal places.
+
+Why not half:
+BHD 0.0005 cannot be represented at the required ledger precision.
+
+## Installment remainder allocation
+
+Value:
+The earliest installment receives the first remaining minor unit.
+
+Reason:
+BHD 10.000 cannot be divided exactly into three representable BHD
+amounts.
+
+A deterministic remainder allocation is required so replay always
+produces the same ledger.
+
+## Day 6 interest and capitalization ordering
+
+The specification requires daily interest through Day 6 and a single
+capitalization at the end of Day 6, but does not explicitly state
+whether the newly capitalized interest itself earns Day 6 interest.
+
+Resolution:
+
+Day 6 interest is calculated from the closing ledger balance before
+the interest capitalization entry.
+
+The rounded Day 1–Day 6 accruals are then summed and posted as one
+Day 6 credit.
+
+This avoids interest earning interest on the same day it is
+capitalized.
