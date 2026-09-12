@@ -57,6 +57,7 @@ Run:
 
 ```bash
 pytest -v -m "not intentional_failure"
+python -m pytest -v -m "not intentional_failure"
 ```
 
 This excludes the deliberately retained failing test.
@@ -112,6 +113,7 @@ Run:
 
 ```bash
 python run.py
+python3 run.py
 ```
 
 The runner replays the assessment event stream in the exact supplied order.
